@@ -73,7 +73,9 @@ public final class ToggleRegistry: ObservableObject {
         let loadedEnabledIDs = preferencesStore.loadEnabledIDs().intersection(knownIDs)
         let loadedOrder = preferencesStore.loadOrder().filter { knownIDs.contains($0) }
 
-        enabledIDs = loadedEnabledIDs.isEmpty ? knownIDs : loadedEnabledIDs
+        let previouslyKnownIDs = Set(loadedOrder)
+        let newIDs = knownIDs.subtracting(previouslyKnownIDs)
+        enabledIDs = loadedEnabledIDs.isEmpty ? knownIDs : loadedEnabledIDs.union(newIDs)
         order = loadedOrder + toggles.map { $0.id }.filter { loadedOrder.contains($0) == false }
     }
 }
