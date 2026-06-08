@@ -40,11 +40,7 @@ struct ToggleRowView: View {
 
     @ViewBuilder
     private var control: some View {
-        if toggle.isBusy {
-            ProgressView()
-                .scaleEffect(0.7)
-                .frame(width: 42)
-        } else if toggle.controlType == .action {
+        if toggle.controlType == .action {
             Button(action: {
                 toggle.triggerAction()
             }) {
