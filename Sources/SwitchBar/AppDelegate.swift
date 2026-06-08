@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         registry.register(AnyToggleProvider(KeepAwakeToggle()))
         registry.register(AnyToggleProvider(HideDesktopToggle()))
         registry.register(AnyToggleProvider(ScreenSaverToggle()))
+        registry.register(AnyToggleProvider(ShowHiddenFilesToggle()))
         registry.loadState()
     }
 
