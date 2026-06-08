@@ -7,32 +7,17 @@ public final class HideDesktopToggle: ToggleProvider {
     public let iconName = "desktopcomputer"
     @Published public var isOn: Bool = false
 
-    private let shell: ShellRunning
+    private let service: FinderDesktopIconService
 
-    public init(shell: ShellRunning = ShellHelper()) {
-        self.shell = shell
+    public init(service: FinderDesktopIconService = FinderDesktopIconService()) {
+        self.service = service
     }
 
     public func apply(newValue: Bool) -> Bool {
-        let createDesktopValue = newValue ? "false" : "true"
-        let command = "defaults write com.apple.finder CreateDesktop -bool \(createDesktopValue) && killall Finder"
-
-        do {
-            _ = try shell.run(command)
-            return true
-        } catch {
-            return false
-        }
+        service.setDesktopIconsHidden(newValue)
     }
 
     public func refreshState() {
-        do {
-            let output = try shell.run("defaults read com.apple.finder CreateDesktop")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            isOn = output == "0" || output == "false"
-        } catch {
-            isOn = false
-        }
+        isOn = service.areDesktopIconsHidden()
     }
 }

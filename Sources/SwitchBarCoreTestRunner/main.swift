@@ -112,6 +112,37 @@ final class MockShellRunner: ShellRunning {
     }
 }
 
+final class MockFinderPreferenceManager: FinderPreferenceManaging {
+    var values: [FinderPreferenceKey: Bool]
+    var writes: [(FinderPreferenceKey, Bool)] = []
+    var shouldWriteSucceed = true
+
+    init(values: [FinderPreferenceKey: Bool] = [:]) {
+        self.values = values
+    }
+
+    func readBool(key: FinderPreferenceKey, defaultValue: Bool) -> Bool {
+        values[key] ?? defaultValue
+    }
+
+    func writeBool(_ value: Bool, key: FinderPreferenceKey) -> Bool {
+        writes.append((key, value))
+        guard shouldWriteSucceed else { return false }
+        values[key] = value
+        return true
+    }
+}
+
+final class MockFinderReloader: FinderReloading {
+    var policies: [FinderReopenPolicy] = []
+    var shouldReloadSucceed = true
+
+    func reloadFinder(reopenPolicy: FinderReopenPolicy) -> Bool {
+        policies.append(reopenPolicy)
+        return shouldReloadSucceed
+    }
+}
+
 private let tests: [(String, () throws -> Void)] = [
     ("toggle updates only after successful apply", {
         let provider = MockToggleProvider(isOn: false)
@@ -208,53 +239,145 @@ private let tests: [(String, () throws -> Void)] = [
 
         try expect(store.savedIsOnByID["keepAwake"] == nil, "registry should not save isOn values")
     }),
-    ("CreateDesktop false means hide desktop is on", {
-        let shell = MockShellRunner(outputs: ["0"])
-        let toggle = HideDesktopToggle(shell: shell)
+    ("desktop icon service reads CreateDesktop false as hidden", {
+        let preferences = MockFinderPreferenceManager(values: [.createDesktop: false])
+        let service = FinderDesktopIconService(preferences: preferences, reloader: MockFinderReloader())
 
-        toggle.refreshState()
-
-        try expect(toggle.isOn, "CreateDesktop false should mean hidden desktop")
+        try expect(service.areDesktopIconsHidden(), "CreateDesktop false should mean hidden desktop")
     }),
-    ("CreateDesktop true means hide desktop is off", {
-        let shell = MockShellRunner(outputs: ["1"])
-        let toggle = HideDesktopToggle(shell: shell)
+    ("desktop icon service reads CreateDesktop true as visible", {
+        let preferences = MockFinderPreferenceManager(values: [.createDesktop: true])
+        let service = FinderDesktopIconService(preferences: preferences, reloader: MockFinderReloader())
 
-        toggle.refreshState()
-
-        try expect(!toggle.isOn, "CreateDesktop true should mean visible desktop")
+        try expect(!service.areDesktopIconsHidden(), "CreateDesktop true should mean visible desktop")
     }),
-    ("missing CreateDesktop key defaults to desktop visible", {
-        let shell = MockShellRunner(results: [
-            .failure(ShellError.nonZeroExit(code: 1, output: "does not exist"))
-        ])
-        let toggle = HideDesktopToggle(shell: shell)
+    ("desktop icon service defaults missing CreateDesktop to visible", {
+        let preferences = MockFinderPreferenceManager()
+        let service = FinderDesktopIconService(preferences: preferences, reloader: MockFinderReloader())
 
-        toggle.refreshState()
-
-        try expect(!toggle.isOn, "missing key should default to desktop visible")
+        try expect(!service.areDesktopIconsHidden(), "missing CreateDesktop key should mean visible desktop")
     }),
-    ("apply hide desktop writes CreateDesktop false", {
-        let shell = MockShellRunner()
-        let toggle = HideDesktopToggle(shell: shell)
+    ("desktop icon service hides icons by writing CreateDesktop false and reloading Finder", {
+        let preferences = MockFinderPreferenceManager()
+        let reloader = MockFinderReloader()
+        let service = FinderDesktopIconService(preferences: preferences, reloader: reloader)
+
+        let success = service.setDesktopIconsHidden(true)
+
+        try expect(success, "hide desktop should succeed")
+        try expectEqual(preferences.writes.map { $0.0 }, [.createDesktop], "hide desktop should only write CreateDesktop")
+        try expectEqual(preferences.writes.map { $0.1 }, [false], "hide desktop should write CreateDesktop false")
+        try expectEqual(reloader.policies, [.reopenIfUserHadFinderWindow], "hide desktop should use controlled Finder reload")
+    }),
+    ("desktop icon service shows icons by writing CreateDesktop true and reloading Finder", {
+        let preferences = MockFinderPreferenceManager()
+        let reloader = MockFinderReloader()
+        let service = FinderDesktopIconService(preferences: preferences, reloader: reloader)
+
+        let success = service.setDesktopIconsHidden(false)
+
+        try expect(success, "show desktop should succeed")
+        try expectEqual(preferences.writes.map { $0.0 }, [.createDesktop], "show desktop should only write CreateDesktop")
+        try expectEqual(preferences.writes.map { $0.1 }, [true], "show desktop should write CreateDesktop true")
+        try expectEqual(reloader.policies, [.reopenIfUserHadFinderWindow], "show desktop should use controlled Finder reload")
+    }),
+    ("hide desktop toggle delegates only to desktop icon service", {
+        let preferences = MockFinderPreferenceManager()
+        let reloader = MockFinderReloader()
+        let toggle = HideDesktopToggle(service: FinderDesktopIconService(preferences: preferences, reloader: reloader))
 
         let success = toggle.apply(newValue: true)
 
         try expect(success, "hide desktop command should succeed")
-        try expectEqual(shell.commands, [
-            "defaults write com.apple.finder CreateDesktop -bool false && killall Finder"
-        ], "hide desktop command should write false")
+        try expectEqual(preferences.writes.map { $0.0 }, [.createDesktop], "hide desktop toggle should not write hidden-files preference")
+        try expectEqual(reloader.policies, [.reopenIfUserHadFinderWindow], "hide desktop toggle should not reload Finder directly")
     }),
-    ("apply show desktop writes CreateDesktop true", {
-        let shell = MockShellRunner()
-        let toggle = HideDesktopToggle(shell: shell)
+    ("hidden files service writes only AppleShowAllFiles and reloads Finder", {
+        let preferences = MockFinderPreferenceManager()
+        let reloader = MockFinderReloader()
+        let service = FinderHiddenFilesService(preferences: preferences, reloader: reloader)
+
+        let success = service.setHiddenFilesVisible(true)
+
+        try expect(success, "show hidden files should succeed")
+        try expectEqual(preferences.writes.map { $0.0 }, [.appleShowAllFiles], "show hidden files should only write AppleShowAllFiles")
+        try expectEqual(preferences.writes.map { $0.1 }, [true], "show hidden files should write true")
+        try expectEqual(reloader.policies, [.reopenIfUserHadFinderWindow], "show hidden files should use controlled Finder reload")
+    }),
+    ("show hidden files toggle does not touch desktop icon preference", {
+        let preferences = MockFinderPreferenceManager()
+        let reloader = MockFinderReloader()
+        let toggle = ShowHiddenFilesToggle(service: FinderHiddenFilesService(preferences: preferences, reloader: reloader))
 
         let success = toggle.apply(newValue: false)
 
-        try expect(success, "show desktop command should succeed")
+        try expect(success, "hide hidden files should succeed")
+        try expectEqual(preferences.writes.map { $0.0 }, [.appleShowAllFiles], "show hidden files toggle should not write CreateDesktop")
+        try expectEqual(preferences.writes.map { $0.1 }, [false], "show hidden files toggle should write false")
+        try expectEqual(reloader.policies, [.reopenIfUserHadFinderWindow], "show hidden files toggle should not reload Finder directly")
+    }),
+    ("Finder reloader never policy kills Finder without reopening it", {
+        let shell = MockShellRunner()
+        let reloader = FinderReloader(shell: shell, hadFinderWindow: { false })
+
+        let success = reloader.reloadFinder(reopenPolicy: .never)
+
+        try expect(success, "Finder reload should succeed")
+        try expectEqual(shell.commands, ["killall Finder"], "never policy should not open Finder")
+    }),
+    ("Finder reloader reopens only when user had Finder window", {
+        let shell = MockShellRunner()
+        let reloader = FinderReloader(shell: shell, hadFinderWindow: { true })
+
+        let success = reloader.reloadFinder(reopenPolicy: .reopenIfUserHadFinderWindow)
+
+        try expect(success, "Finder reload should succeed")
         try expectEqual(shell.commands, [
-            "defaults write com.apple.finder CreateDesktop -bool true && killall Finder"
-        ], "show desktop command should write true")
+            "killall Finder",
+            "while ! pgrep -qx Finder; do sleep 0.05; done",
+            "open -a Finder"
+        ], "reopenIfUserHadFinderWindow should reopen only when predicate was true")
+    }),
+    ("Finder reloader treats Finder reopen failure as best effort", {
+        let shell = MockShellRunner(results: [
+            .success(""),
+            .success(""),
+            .failure(ShellError.nonZeroExit(code: 1, output: "open failed"))
+        ])
+        let reloader = FinderReloader(shell: shell, hadFinderWindow: { true })
+
+        let success = reloader.reloadFinder(reopenPolicy: .reopenIfUserHadFinderWindow)
+
+        try expect(success, "Finder reload should succeed even when reopening Finder fails")
+        try expectEqual(shell.commands, [
+            "killall Finder",
+            "while ! pgrep -qx Finder; do sleep 0.05; done",
+            "open -a Finder"
+        ], "reopen failure should still attempt the expected best-effort commands")
+    }),
+    ("Finder reloader treats Finder wait failure as best effort", {
+        let shell = MockShellRunner(results: [
+            .success(""),
+            .failure(ShellError.nonZeroExit(code: 1, output: "wait failed"))
+        ])
+        let reloader = FinderReloader(shell: shell, hadFinderWindow: { true })
+
+        let success = reloader.reloadFinder(reopenPolicy: .reopenIfUserHadFinderWindow)
+
+        try expect(success, "Finder reload should succeed even when waiting to reopen Finder fails")
+        try expectEqual(shell.commands, [
+            "killall Finder",
+            "while ! pgrep -qx Finder; do sleep 0.05; done"
+        ], "wait failure should not make the toggle fail")
+    }),
+    ("Finder reloader does not reopen when user had no Finder window", {
+        let shell = MockShellRunner()
+        let reloader = FinderReloader(shell: shell, hadFinderWindow: { false })
+
+        let success = reloader.reloadFinder(reopenPolicy: .reopenIfUserHadFinderWindow)
+
+        try expect(success, "Finder reload should succeed")
+        try expectEqual(shell.commands, ["killall Finder"], "reopenIfUserHadFinderWindow should not open Finder without an existing window")
     })
 ]
 
