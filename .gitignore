@@ -41,3 +41,9 @@ build/
 
 # Claude
 .claude/
+
+# Local-only files (not for distribution)
+main.py
+DEVELOPMENT_LOG.md
+SRD.md
+TDD.md
