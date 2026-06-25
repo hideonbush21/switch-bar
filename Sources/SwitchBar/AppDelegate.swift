@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         registry.register(AnyToggleProvider(EmptyTrashToggle()))
         registry.register(AnyToggleProvider(TrueToneToggle()))
         registry.register(AnyToggleProvider(LowPowerModeToggle()))
+        registry.register(AnyToggleProvider(NaturalScrollToggle()))
         registry.loadState()
     }
 

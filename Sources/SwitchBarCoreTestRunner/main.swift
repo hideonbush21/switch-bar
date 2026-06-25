@@ -495,6 +495,52 @@ private let tests: [(String, () throws -> Void)] = [
         try expect(shell.commands[0].contains("rm -f /etc/sudoers.d/switchbar-pmset"), "remove should delete the sudoers file")
         try expect(shell.commands[0].contains("with administrator privileges"), "remove should use admin privileges")
     }),
+    ("natural scroll reads value 2 as on", {
+        let shell = MockShellRunner(outputs: ["2\n"])
+        let toggle = NaturalScrollToggle(shell: shell)
+
+        toggle.refreshState()
+
+        try expect(toggle.isOn, "scrollBehavior 2 should mean natural scroll on")
+        try expect(shell.commands[0].contains("com.apple.trackpad.scrollBehavior"), "should read the correct defaults key")
+    }),
+    ("natural scroll reads value 1 as off", {
+        let shell = MockShellRunner(outputs: ["1\n"])
+        let toggle = NaturalScrollToggle(shell: shell)
+
+        toggle.refreshState()
+
+        try expect(!toggle.isOn, "scrollBehavior 1 should mean natural scroll off")
+    }),
+    ("natural scroll defaults to on when read fails", {
+        let shell = MockShellRunner(results: [
+            .failure(ShellError.nonZeroExit(code: 1, output: "does not exist"))
+        ])
+        let toggle = NaturalScrollToggle(shell: shell)
+
+        toggle.refreshState()
+
+        try expect(toggle.isOn, "should default to natural scroll on when key missing")
+    }),
+    ("natural scroll apply on writes value 2", {
+        let shell = MockShellRunner(outputs: [""])
+        let toggle = NaturalScrollToggle(shell: shell)
+
+        let success = toggle.apply(newValue: true)
+
+        try expect(success, "apply on should succeed")
+        try expect(shell.commands[0].contains("-int 2"), "enable natural scroll should write 2")
+        try expect(shell.commands[0].contains("-currentHost"), "should use -currentHost flag")
+    }),
+    ("natural scroll apply off writes value 1", {
+        let shell = MockShellRunner(outputs: [""])
+        let toggle = NaturalScrollToggle(shell: shell)
+
+        let success = toggle.apply(newValue: false)
+
+        try expect(success, "apply off should succeed")
+        try expect(shell.commands[0].contains("-int 1"), "disable natural scroll should write 1")
+    }),
     ("Finder reloader does not reopen when user had no Finder window", {
         let shell = MockShellRunner()
         let reloader = FinderReloader(shell: shell, hadFinderWindow: { false })

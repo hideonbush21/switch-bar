@@ -95,3 +95,13 @@
 - 新增全局事件监听器（`NSEvent.addGlobalMonitorForEvents`）捕获 popover 外部的鼠标点击。
 - 新增本地事件监听器（`NSEvent.addLocalMonitorForEvents`）捕获 app 内但 popover 外的点击。
 - popover 关闭时（手动关闭或 `popoverDidClose` 回调）自动移除所有事件监听器，避免内存泄漏。
+
+## 2026-06-26 新增自然滚动方向切换
+
+- 新增 `NaturalScrollToggle`：通过 `defaults -currentHost` 读写 `com.apple.trackpad.scrollBehavior`。
+  - 值 `2` = 自然滚动（macOS 默认），值 `1` = 传统方向。
+  - 存储在 ByHost GlobalPreferences 中，使用 `-currentHost` 标志访问。
+  - 无需管理员权限，无私有框架依赖。
+  - 读取失败时默认为自然滚动开启（macOS 出厂默认）。
+- `AppDelegate` 注册新 Toggle。
+- 新增 5 个测试覆盖读取、写入和默认值回退。
