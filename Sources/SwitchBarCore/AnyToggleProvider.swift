@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 
+public typealias AsyncExecutor = (@escaping () -> Void) -> Void
+
 public final class AnyToggleProvider: Identifiable, ObservableObject {
     public let id: String
     public let title: String
@@ -21,8 +23,18 @@ public final class AnyToggleProvider: Identifiable, ObservableObject {
     private let _refresh: () -> Void
     private let _readIsOn: () -> Bool
     private let providerObject: AnyObject
+    private let executeInBackground: AsyncExecutor
+    private let executeOnMain: AsyncExecutor
 
-    public init<T: ToggleProvider>(_ provider: T) where T.ID == String {
+    public init<T: ToggleProvider>(
+        _ provider: T,
+        executeInBackground: @escaping AsyncExecutor = { work in
+            DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        },
+        executeOnMain: @escaping AsyncExecutor = { work in
+            DispatchQueue.main.async(execute: work)
+        }
+    ) where T.ID == String {
         self.id = provider.id
         self.title = provider.title
         self.iconName = provider.iconName
@@ -34,6 +46,8 @@ public final class AnyToggleProvider: Identifiable, ObservableObject {
         self._apply = { provider.apply(newValue: $0) }
         self._refresh = { provider.refreshState() }
         self._readIsOn = { provider.isOn }
+        self.executeInBackground = executeInBackground
+        self.executeOnMain = executeOnMain
     }
 
     public func requestSet(_ newValue: Bool) {
@@ -44,18 +58,21 @@ public final class AnyToggleProvider: Identifiable, ObservableObject {
         isBusy = true
         errorMessage = nil
 
-        let success = _apply(newValue)
-        if success {
-            _setIsOn(newValue)
-            isOn = newValue
-        } else {
-            _setIsOn(oldValue)
-            errorMessage = "操作失败，请稍后重试"
-            _refresh()
-            isOn = _readIsOn()
+        executeInBackground { [self] in
+            let success = _apply(newValue)
+            executeOnMain {
+                if success {
+                    _setIsOn(newValue)
+                    isOn = newValue
+                } else {
+                    _setIsOn(oldValue)
+                    errorMessage = "操作失败，请稍后重试"
+                    _refresh()
+                    isOn = _readIsOn()
+                }
+                isBusy = false
+            }
         }
-
-        isBusy = false
     }
 
     public func triggerAction() {
@@ -65,14 +82,17 @@ public final class AnyToggleProvider: Identifiable, ObservableObject {
         isBusy = true
         errorMessage = nil
 
-        let success = _apply(true)
-        if !success {
-            errorMessage = "操作失败，请稍后重试"
+        executeInBackground { [self] in
+            let success = _apply(true)
+            executeOnMain {
+                if !success {
+                    errorMessage = "操作失败，请稍后重试"
+                }
+                _setIsOn(false)
+                isOn = false
+                isBusy = false
+            }
         }
-
-        _setIsOn(false)
-        isOn = false
-        isBusy = false
     }
 
     public func refreshState() {

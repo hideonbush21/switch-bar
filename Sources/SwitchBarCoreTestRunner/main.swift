@@ -143,10 +143,16 @@ final class MockFinderReloader: FinderReloading {
     }
 }
 
+private let syncExecutor: AsyncExecutor = { $0() }
+
+private func makeSyncToggle(_ provider: MockToggleProvider) -> AnyToggleProvider {
+    AnyToggleProvider(provider, executeInBackground: syncExecutor, executeOnMain: syncExecutor)
+}
+
 private let tests: [(String, () throws -> Void)] = [
     ("toggle updates only after successful apply", {
         let provider = MockToggleProvider(isOn: false)
-        let toggle = AnyToggleProvider(provider)
+        let toggle = makeSyncToggle(provider)
 
         toggle.requestSet(true)
 
@@ -159,7 +165,7 @@ private let tests: [(String, () throws -> Void)] = [
     ("failed apply keeps old state and shows error", {
         let provider = MockToggleProvider(isOn: false)
         provider.applyResult = false
-        let toggle = AnyToggleProvider(provider)
+        let toggle = makeSyncToggle(provider)
 
         toggle.requestSet(true)
 
@@ -171,7 +177,7 @@ private let tests: [(String, () throws -> Void)] = [
     }),
     ("busy toggle ignores duplicate requests", {
         let provider = MockToggleProvider(isOn: false)
-        let toggle = AnyToggleProvider(provider)
+        let toggle = makeSyncToggle(provider)
         provider.onApply = {
             toggle.requestSet(false)
         }
@@ -184,7 +190,7 @@ private let tests: [(String, () throws -> Void)] = [
     }),
     ("action does not retain on state", {
         let provider = MockToggleProvider(isOn: false, controlType: .action)
-        let toggle = AnyToggleProvider(provider)
+        let toggle = makeSyncToggle(provider)
 
         toggle.triggerAction()
 
@@ -369,6 +375,58 @@ private let tests: [(String, () throws -> Void)] = [
             "killall Finder",
             "while ! pgrep -qx Finder; do sleep 0.05; done"
         ], "wait failure should not make the toggle fail")
+    }),
+    ("requestSet dispatches apply to background executor", {
+        let provider = MockToggleProvider(isOn: false)
+        var bgCalled = false
+        var mainCalled = false
+        let toggle = AnyToggleProvider(
+            provider,
+            executeInBackground: { work in bgCalled = true; work() },
+            executeOnMain: { work in mainCalled = true; work() }
+        )
+
+        toggle.requestSet(true)
+
+        try expect(bgCalled, "apply should run through background executor")
+        try expect(mainCalled, "state update should run through main executor")
+        try expect(toggle.isOn, "toggle should turn on")
+        try expect(!toggle.isBusy, "toggle should not stay busy")
+    }),
+    ("triggerAction dispatches apply to background executor", {
+        let provider = MockToggleProvider(isOn: false, controlType: .action)
+        var bgCalled = false
+        var mainCalled = false
+        let toggle = AnyToggleProvider(
+            provider,
+            executeInBackground: { work in bgCalled = true; work() },
+            executeOnMain: { work in mainCalled = true; work() }
+        )
+
+        toggle.triggerAction()
+
+        try expect(bgCalled, "action apply should run through background executor")
+        try expect(mainCalled, "action state update should run through main executor")
+        try expect(!toggle.isOn, "action should not remain on")
+    }),
+    ("requestSet shows busy before background work starts", {
+        let provider = MockToggleProvider(isOn: false)
+        var capturedBusy = false
+        var deferredWork: (() -> Void)?
+        let toggle = AnyToggleProvider(
+            provider,
+            executeInBackground: { work in
+                deferredWork = work
+            },
+            executeOnMain: { work in work() }
+        )
+
+        toggle.requestSet(true)
+        capturedBusy = toggle.isBusy
+        deferredWork?()
+
+        try expect(capturedBusy, "isBusy should be true when background work starts")
+        try expect(!toggle.isBusy, "isBusy should be false after completion")
     }),
     ("Finder reloader does not reopen when user had no Finder window", {
         let shell = MockShellRunner()
