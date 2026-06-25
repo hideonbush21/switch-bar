@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let popover = NSPopover()
     private let registry = ToggleRegistry()
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerToggles()
@@ -50,16 +52,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func togglePopover() {
         if popover.isShown {
-            popover.performClose(nil)
+            closePopover()
             return
         }
 
         guard let button = statusItem.button else { return }
         registry.refreshAll()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        installEventMonitors()
+    }
+
+    private func closePopover() {
+        popover.performClose(nil)
+        removeEventMonitors()
+    }
+
+    private func installEventMonitors() {
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.closePopover()
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self = self, self.popover.isShown else { return event }
+            if let contentView = self.popover.contentViewController?.view,
+               contentView.window != event.window {
+                self.closePopover()
+            }
+            return event
+        }
+    }
+
+    private func removeEventMonitors() {
+        if let monitor = globalMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalMonitor = nil
+        }
+        if let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMonitor = nil
+        }
     }
 
     func popoverWillShow(_ notification: Notification) {
         registry.refreshAll()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        removeEventMonitors()
     }
 }

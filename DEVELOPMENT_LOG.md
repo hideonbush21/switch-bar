@@ -88,3 +88,10 @@
 - 脚本执行后自清理（`rm -f`），不再残留在 `/tmp`。
 - 新增 `LowPowerModeToggle.removeSudoersRule()` 静态方法，供卸载或设置页面清理免密规则。
 - 新增 4 个测试覆盖快速路径、随机路径、visudo 校验和规则移除。
+
+## 2026-06-26 修复 Popover 点击外部不关闭
+
+- macOS status bar popover 的 `.transient` behavior 存在已知兼容性问题，点击外部不会自动关闭。
+- 新增全局事件监听器（`NSEvent.addGlobalMonitorForEvents`）捕获 popover 外部的鼠标点击。
+- 新增本地事件监听器（`NSEvent.addLocalMonitorForEvents`）捕获 app 内但 popover 外的点击。
+- popover 关闭时（手动关闭或 `popoverDidClose` 回调）自动移除所有事件监听器，避免内存泄漏。
