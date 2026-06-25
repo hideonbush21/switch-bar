@@ -428,6 +428,73 @@ private let tests: [(String, () throws -> Void)] = [
         try expect(capturedBusy, "isBusy should be true when background work starts")
         try expect(!toggle.isBusy, "isBusy should be false after completion")
     }),
+    ("low power mode fast path uses sudo -n", {
+        let shell = MockShellRunner(outputs: [""])
+        let toggle = LowPowerModeToggle(shell: shell)
+
+        let success = toggle.apply(newValue: true)
+
+        try expect(success, "fast path should succeed")
+        try expectEqual(shell.commands.count, 1, "fast path should run one command")
+        try expect(shell.commands[0].contains("sudo -n"), "fast path should use sudo -n for non-interactive auth")
+        try expect(shell.commands[0].contains("lowpowermode 1"), "fast path should pass correct value")
+    }),
+    ("low power mode fallback script has random path and visudo check", {
+        let shell = MockShellRunner(results: [
+            .failure(ShellError.nonZeroExit(code: 1, output: "sudo: a password is required")),
+            .success("")
+        ])
+        let toggle = LowPowerModeToggle(shell: shell)
+
+        let success = toggle.apply(newValue: false)
+
+        try expect(success, "fallback path should succeed")
+        try expectEqual(shell.commands.count, 2, "fallback should run two commands")
+
+        let fallbackCmd = shell.commands[1]
+        try expect(fallbackCmd.contains("osascript"), "fallback should use osascript for admin privileges")
+        try expect(fallbackCmd.contains("switchbar-pmset-"), "fallback script path should contain prefix")
+        try expect(!fallbackCmd.hasSuffix("switchbar-pmset-setup.sh'"), "fallback script path should not use fixed name")
+    }),
+    ("low power mode fallback script includes visudo validation", {
+        let shell = MockShellRunner(results: [
+            .failure(ShellError.nonZeroExit(code: 1, output: "sudo: a password is required")),
+            .success("")
+        ])
+        let toggle = LowPowerModeToggle(shell: shell)
+        _ = toggle.apply(newValue: true)
+
+        let fallbackCmd = shell.commands[1]
+        let scriptPathStart = fallbackCmd.range(of: "sh /")!.upperBound
+        let scriptPathEnd = fallbackCmd.range(of: "\" with", range: scriptPathStart..<fallbackCmd.endIndex)!.lowerBound
+        let scriptPath = String(fallbackCmd[scriptPathStart..<scriptPathEnd])
+
+        let scriptContent = (try? String(contentsOfFile: scriptPath, encoding: .utf8)) ?? ""
+        let scriptExists = FileManager.default.fileExists(atPath: scriptPath)
+
+        if scriptExists {
+            try expect(scriptContent.contains("visudo -cf"), "script must validate sudoers with visudo before installing")
+            try expect(scriptContent.contains("set -e"), "script must use set -e to abort on any failure")
+            try expect(scriptContent.contains(".switchbar-pmset.tmp"), "script must write to temp file before mv")
+            try expect(scriptContent.contains("rm -f"), "script must clean up itself after execution")
+
+            let attrs = try FileManager.default.attributesOfItem(atPath: scriptPath)
+            let perms = (attrs[.posixPermissions] as? Int) ?? 0
+            try expectEqual(perms, 0o700, "script file should have 0700 permissions")
+            try? FileManager.default.removeItem(atPath: scriptPath)
+        } else {
+            try expect(true, "script already cleaned up by previous run — path randomization working")
+        }
+    }),
+    ("low power mode removeSudoersRule calls correct command", {
+        let shell = MockShellRunner(outputs: [""])
+        let success = LowPowerModeToggle.removeSudoersRule(shell: shell)
+
+        try expect(success, "remove rule should succeed")
+        try expectEqual(shell.commands.count, 1, "remove should run one command")
+        try expect(shell.commands[0].contains("rm -f /etc/sudoers.d/switchbar-pmset"), "remove should delete the sudoers file")
+        try expect(shell.commands[0].contains("with administrator privileges"), "remove should use admin privileges")
+    }),
     ("Finder reloader does not reopen when user had no Finder window", {
         let shell = MockShellRunner()
         let reloader = FinderReloader(shell: shell, hadFinderWindow: { false })

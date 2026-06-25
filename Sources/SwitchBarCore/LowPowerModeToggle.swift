@@ -33,16 +33,31 @@ public final class LowPowerModeToggle: ToggleProvider {
     private func installAndApplyCommand(value: String) -> String {
         let user = NSUserName()
         let rule = "\(user) ALL=(root) NOPASSWD: /usr/bin/pmset -a lowpowermode 0, /usr/bin/pmset -a lowpowermode 1"
-        // 写临时脚本避免 osascript 嵌套引号问题
-        let scriptPath = NSTemporaryDirectory() + "switchbar-pmset-setup.sh"
+        let scriptPath = NSTemporaryDirectory() + "switchbar-pmset-\(UUID().uuidString).sh"
+        let sudoersTmp = "/etc/sudoers.d/.switchbar-pmset.tmp"
+        let sudoersDst = "/etc/sudoers.d/switchbar-pmset"
         let script = """
             #!/bin/sh
+            set -e
             /usr/bin/pmset -a lowpowermode \(value)
-            echo '\(rule)' > /etc/sudoers.d/switchbar-pmset
-            chmod 0440 /etc/sudoers.d/switchbar-pmset
+            echo '\(rule)' > \(sudoersTmp)
+            chmod 0440 \(sudoersTmp)
+            /usr/sbin/visudo -cf \(sudoersTmp) >/dev/null 2>&1
+            mv \(sudoersTmp) \(sudoersDst)
+            rm -f \(scriptPath)
             """
-        try? script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
+        let fm = FileManager.default
+        fm.createFile(atPath: scriptPath, contents: script.data(using: .utf8), attributes: [.posixPermissions: 0o700])
         return "osascript -e 'do shell script \"sh \(scriptPath)\" with administrator privileges'"
+    }
+
+    public static func removeSudoersRule(shell: ShellRunning = ShellHelper()) -> Bool {
+        do {
+            _ = try shell.run("osascript -e 'do shell script \"rm -f /etc/sudoers.d/switchbar-pmset\" with administrator privileges'")
+            return true
+        } catch {
+            return false
+        }
     }
 
     public func refreshState() {
