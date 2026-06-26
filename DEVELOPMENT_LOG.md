@@ -101,7 +101,9 @@
 - 新增 `NaturalScrollToggle`：通过 `defaults -currentHost` 读写 `com.apple.trackpad.scrollBehavior`。
   - 值 `2` = 自然滚动（macOS 默认），值 `1` = 传统方向。
   - 存储在 ByHost GlobalPreferences 中，使用 `-currentHost` 标志访问。
-  - 无需管理员权限，无私有框架依赖。
+  - 无需管理员权限。
   - 读取失败时默认为自然滚动开启（macOS 出厂默认）。
+  - 即时生效通过 CoreGraphics 私有 API `CGSSetSwipeScrollDirection` 实现，持久化通过 `defaults -currentHost write` 写入 ByHost 偏好。
+  - 初版使用 `hidutil` 方案无法即时生效，改用 CGS 私有 API 后解决。
 - `AppDelegate` 注册新 Toggle。
-- 新增 5 个测试覆盖读取、写入和默认值回退。
+- 新增 7 个测试覆盖读取、CGS 写入、defaults 持久化和失败回退。

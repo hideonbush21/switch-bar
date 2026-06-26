@@ -495,22 +495,22 @@ private let tests: [(String, () throws -> Void)] = [
         try expect(shell.commands[0].contains("rm -f /etc/sudoers.d/switchbar-pmset"), "remove should delete the sudoers file")
         try expect(shell.commands[0].contains("with administrator privileges"), "remove should use admin privileges")
     }),
-    ("natural scroll reads value 2 as on", {
+    ("natural scroll reads scrollBehavior 2 as on", {
         let shell = MockShellRunner(outputs: ["2\n"])
         let toggle = NaturalScrollToggle(shell: shell)
 
         toggle.refreshState()
 
         try expect(toggle.isOn, "scrollBehavior 2 should mean natural scroll on")
-        try expect(shell.commands[0].contains("com.apple.trackpad.scrollBehavior"), "should read the correct defaults key")
+        try expect(shell.commands[0].contains("com.apple.trackpad.scrollBehavior"), "should read defaults key")
     }),
-    ("natural scroll reads value 1 as off", {
+    ("natural scroll reads scrollBehavior 1 as off", {
         let shell = MockShellRunner(outputs: ["1\n"])
         let toggle = NaturalScrollToggle(shell: shell)
 
         toggle.refreshState()
 
-        try expect(!toggle.isOn, "scrollBehavior 1 should mean natural scroll off")
+        try expect(!toggle.isOn, "scrollBehavior 1 should mean traditional scroll")
     }),
     ("natural scroll defaults to on when read fails", {
         let shell = MockShellRunner(results: [
@@ -520,26 +520,47 @@ private let tests: [(String, () throws -> Void)] = [
 
         toggle.refreshState()
 
-        try expect(toggle.isOn, "should default to natural scroll on when key missing")
+        try expect(toggle.isOn, "should default to natural scroll on when read fails")
     }),
-    ("natural scroll apply on writes value 2", {
+    ("natural scroll apply on calls CGS and persists defaults", {
         let shell = MockShellRunner(outputs: [""])
-        let toggle = NaturalScrollToggle(shell: shell)
+        var cgsValue: Bool?
+        let toggle = NaturalScrollToggle(
+            shell: shell,
+            setDirection: { v in cgsValue = v; return true }
+        )
 
         let success = toggle.apply(newValue: true)
 
         try expect(success, "apply on should succeed")
-        try expect(shell.commands[0].contains("-int 2"), "enable natural scroll should write 2")
-        try expect(shell.commands[0].contains("-currentHost"), "should use -currentHost flag")
+        try expectEqual(cgsValue, true, "should call CGS with natural=true")
+        try expect(shell.commands[0].contains("-int 2"), "should persist scrollBehavior 2")
     }),
-    ("natural scroll apply off writes value 1", {
+    ("natural scroll apply off calls CGS and persists defaults", {
         let shell = MockShellRunner(outputs: [""])
-        let toggle = NaturalScrollToggle(shell: shell)
+        var cgsValue: Bool?
+        let toggle = NaturalScrollToggle(
+            shell: shell,
+            setDirection: { v in cgsValue = v; return true }
+        )
 
         let success = toggle.apply(newValue: false)
 
         try expect(success, "apply off should succeed")
-        try expect(shell.commands[0].contains("-int 1"), "disable natural scroll should write 1")
+        try expectEqual(cgsValue, false, "should call CGS with natural=false")
+        try expect(shell.commands[0].contains("-int 1"), "should persist scrollBehavior 1")
+    }),
+    ("natural scroll apply fails when CGS fails", {
+        let shell = MockShellRunner()
+        let toggle = NaturalScrollToggle(
+            shell: shell,
+            setDirection: { _ in false }
+        )
+
+        let success = toggle.apply(newValue: true)
+
+        try expect(!success, "should fail when CGS fails")
+        try expectEqual(shell.commands.count, 0, "should not persist when CGS fails")
     }),
     ("Finder reloader does not reopen when user had no Finder window", {
         let shell = MockShellRunner()
